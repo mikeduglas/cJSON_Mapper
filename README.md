@@ -11,6 +11,7 @@ There are some options to handle resulting output:
 - "Rounding up" rounds string sizes up to the next power of 2.
 - "Generate program" generates complete program file instead of pure struct declaration statement.
 
+Unfortunately, Windows Defender may report "Threats detected" or "Virus detected" when the download completes.
 
 ## Contacts
 - <mikeduglas@yandex.ru>
