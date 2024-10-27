@@ -35,7 +35,7 @@ PROGRAM_NAME_AND_VERSION      EQUATE('cJSON Mapper v1.0.0')
 
   CODE
   !- set active charset
-!  codePage = winapi::GetACP()
+  codePage = winapi::GetACP()
   SYSTEM{PROP:CharSet} = CHOOSE(codePage = 1251, CHARSET:CYRILLIC, CHARSET:DEFAULT)
   
   Main()
