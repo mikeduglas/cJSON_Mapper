@@ -1,5 +1,5 @@
-!** cJSON mapper v1.00
-!** 26.10.2024
+!** cJSON mapper v1.01
+!** 04.11.2024
 !** mikeduglas@yandex.com
 !** mikeduglas66@gmail.com
 

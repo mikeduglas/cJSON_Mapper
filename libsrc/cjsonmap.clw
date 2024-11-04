@@ -1,5 +1,5 @@
-!** cJSON mapper v1.00
-!** 26.10.2024
+!** cJSON mapper v1.01
+!** 04.11.2024
 !** mikeduglas@yandex.com
 !** mikeduglas66@gmail.com
 
@@ -13,6 +13,7 @@
     MaxFieldNameSize(typCjsonMap pMap),LONG, PRIVATE
     GenProgramStart(STRING pJson, typCjsonMap pMap, *TStringBuilder sb), PRIVATE
     GenProgramEnd(STRING pJson, typCjsonMap pMap, typCJsonPrintMapOptions pOptions, *TStringBuilder sb), PRIVATE
+    BuildParseOptions(typCjsonMap pMap,*TStringBuilder sb), PRIVATE
     BuildCreateOptions(typCjsonMap pMap,*TStringBuilder sb), PRIVATE
 
     NextPow2(LONG pVal), LONG, PRIVATE
@@ -26,6 +27,10 @@
     IsNumericArrayOfReals(cJSON pArray), BOOL, PRIVATE
     ExtractPaths(cJSON jItem, LONG pCurLevel, STRING pCurPath, *typObjectPaths pPaths), PRIVATE
     ProcessObjectPath(cJSON jItem, STRING pPath), PRIVATE
+    HasSameItem(cJSON jObject, cJSON jItem), BOOL, PRIVATE   !- returns true if jObject has a child with same name and type as jItem.
+    GetTypeName(cJSON jItem), STRING, PRIVATE
+    GetItemIndex(cJSON jObject, STRING pItemName), LONG, PRIVATE
+    FixSameItemNames(cJSON jObject), PRIVATE
     !!!endregion
 
     INCLUDE('printf.inc'), ONCE
@@ -49,6 +54,7 @@ FieldDim                        LONG
 ArraySize                       LONG  !- in json
 IsNull                          BOOL
 FieldLevel                      LONG
+MultiTyped                      BOOL
                               END
 typCjsonMap                   QUEUE(typCjsonStruct), TYPE.
 
@@ -110,6 +116,7 @@ sCodeStart                      STRING(   '  PROGRAM<13,10>'                    
 GenProgramEnd                 PROCEDURE(STRING pJson, typCjsonMap pMap, typCJsonPrintMapOptions pOptions, *TStringBuilder sb)
 map1                            LIKE(typCjsonStruct)  !- properties of the field 1 (root)
 sbParse                         TStringBuilder
+sbParseOptions                  TStringBuilder
 sbCreate                        TStringBuilder
 sbCreateOptions                 TStringBuilder
 sbCodeEnd                       TStringBuilder
@@ -121,6 +128,7 @@ nDataType                       LONG(0)
   END
   
   sbParse.Init(1024)
+  sbParseOptions.Init(4096)
   sbCreate.Init(4096)
   sbCreateOptions.Init(4096)
   sbCodeEnd.Init(1024)
@@ -157,6 +165,9 @@ nDataType                       LONG(0)
     nDataType = ClaDataType::BOOL
   END
 
+  !- build ToGroup() options
+  BuildParseOptions(pMap, sbParseOptions)
+
   CASE nObjectType 
   OF ClaObjectType::QUEUE OROF ClaObjectType::GROUPARRAY OROF ClaObjectType::GROUP
     !- build json::CreateObject() options
@@ -166,15 +177,15 @@ nDataType                       LONG(0)
   CASE nObjectType 
   OF ClaObjectType::QUEUE
     !- array of objects
-    sbParse.Cat(printf('IF jParser.ToQueue(sJson, %s)', map1.FieldName))
+    sbParse.Cat(printf('IF jParser.ToQueue(sJson, %s, FALSE, | %|%s)', map1.FieldName, sbParseOptions.Str()))
     sbCreate.Cat(printf('json::CreateArray(%s, TRUE, | %|%s)', map1.FieldName, sbCreateOptions.Str()))
   OF ClaObjectType::GROUPARRAY
     !- array of objects
-    sbParse.Cat(printf('IF jParser.ToGroupArray(sJson, %s)', map1.FieldName))
+    sbParse.Cat(printf('IF jParser.ToGroupArray(sJson, %s, FALSE, | %|%s)', map1.FieldName, sbParseOptions.Str()))
     sbCreate.Cat(printf('json::CreateArray(%s, TRUE, | %|%s)', map1.FieldName, sbCreateOptions.Str()))
   OF ClaObjectType::GROUP
     !- object
-    sbParse.Cat(printf('IF jParser.ToGroup(sJson, %s)', map1.FieldName))
+    sbParse.Cat(printf('IF jParser.ToGroup(sJson, %s, FALSE, | %|%s)', map1.FieldName, sbParseOptions.Str()))
     sbCreate.Cat(printf('json::CreateObject(%s, TRUE, | %|%s)', map1.FieldName, sbCreateOptions.Str()))
   OF ClaObjectType::TYPEARRAY
     !- simple array of primitives
@@ -231,6 +242,51 @@ nDataType                       LONG(0)
   sb.Cat(printf(sbCodeEnd.Str(), sbParse.Str(), sbCreate.Str()))
   sb.Cat('<13,10,13,10>')
 
+BuildParseOptions             PROCEDURE(typCjsonMap pMap,*TStringBuilder sb)
+i                               LONG, AUTO
+qUniqueMap                      QUEUE(typCjsonMap).
+qParseOptions                   QUEUE
+Line                              STRING(4096)
+                                END
+  CODE
+  !- make unique field list
+  LOOP i=1 TO RECORDS(pMap)
+    GET(pMap, i)
+    qUniqueMap.FieldName = pMap.FieldName
+    GET(qUniqueMap, qUniqueMap.FieldName)
+    IF ERRORCODE()
+      qUniqueMap :=: pMap
+      ADD(qUniqueMap)
+    END
+  END
+  
+  !- add JsonName rules for the fields with completely different names/jsonnames (unique names only)
+  LOOP i=1 TO RECORDS(qUniqueMap)
+    GET(qUniqueMap, i)
+    IF LOWER(qUniqueMap.FieldName) <> LOWER(qUniqueMap.JsonName)
+      CLEAR(qParseOptions)
+      qParseOptions.Line = printf('{{"name":"%s", "JsonName":"%s"}', qUniqueMap.FieldName, qUniqueMap.JsonName)
+      ADD(qParseOptions)
+    END
+  END
+  
+  !- convert parse options list to the multi-line string.
+  LOOP i=1 TO RECORDS(qParseOptions)
+    GET(qParseOptions, i)
+    IF i=1
+      qParseOptions.Line = '['& CLIP(qParseOptions.Line)
+    END
+    IF i=RECORDS(qParseOptions)
+      qParseOptions.Line = CLIP(qParseOptions.Line) &']'
+    END
+    
+    IF i < RECORDS(qParseOptions)
+      sb.Cat(printf('      %S & | %|', CLIP(qParseOptions.Line) &',', qParseOptions.Line))
+    ELSE
+      sb.Cat(printf('      %S', qParseOptions.Line))
+    END
+  END
+  
 BuildCreateOptions            PROCEDURE(typCjsonMap pMap,*TStringBuilder sb)
 i                               LONG, AUTO
 qUniqueMap                      QUEUE(typCjsonMap).
@@ -310,8 +366,7 @@ Line                              STRING(4096)
     ELSE
       sb.Cat(printf('      %S', qCreateOptions.Line))
     END
-  END
-  
+  END  
 
 NextPow2                      PROCEDURE(LONG pVal)
 !https://stackoverflow.com/questions/466204/rounding-up-to-next-power-of-2
@@ -496,7 +551,6 @@ jFisrtObject                    &cJSON, AUTO
 jAnotherObject                  &cJSON, AUTO
 jItem                           &cJSON, AUTO
 jAnotherItem                    &cJSON, AUTO
-jCloneItem                      &cJSON, AUTO
 sItemName                       STRING(64), AUTO
 resCount                        LONG, AUTO
 i                               LONG, AUTO
@@ -507,11 +561,11 @@ j                               LONG, AUTO
   resCount = jRoot.FindPathContext(pPath, output)
   IF resCount > 1
     jFisrtObject &= output.GetObject(1)
-
+    
     !- merge all the objects into 1st one.
     LOOP i=2 TO resCount
       jAnotherObject &= output.GetObject(i)
-      
+
       !- add items not exist in 1st object
       j=1
       LOOP
@@ -519,13 +573,27 @@ j                               LONG, AUTO
         IF jAnotherItem &= NULL
           BREAK
         END
-        
+
         sItemName = jAnotherItem.GetName()
+        
         IF NOT jFisrtObject.HasItem(sItemName, TRUE)
-          !- no such element in 1st object - remove it from that object and add to 1st one.
-          jFisrtObject.AddItemToObject(sItemName, jAnotherObject.DetachItemFromArray(j))
+          !- no such item name in 1st object - add it.
+          jFisrtObject.AddItemToObject(sItemName, jAnotherObject.DetachItemViaPointer(jAnotherItem))
+
+          !- j counter stays the same because we removed the item.
           
-          !- here j srays the same because we removed the item.
+        ELSIF NOT jFisrtObject.HasSameItem(jAnotherItem)
+          !- 1st object has an item with same name but different type - add (insert) it right after existing item.
+          !- Don't add nulls.
+          IF NOT jAnotherItem.IsNull()
+            jFisrtObject.InsertItemInArray(jFisrtObject.GetItemIndex(sItemName)+1, jAnotherObject.DetachItemViaPointer(jAnotherItem))
+            !- j counter stays the same because we removed the item.
+          ELSE
+            !- next another element
+            j += 1
+          END
+          
+
         ELSE
           jItem &= jFisrtObject.GetObjectItem(sItemName, TRUE)
           CASE BAND(jItem.GetType(), 0FFh)
@@ -547,6 +615,87 @@ j                               LONG, AUTO
         END
       END
     END
+    
+    LOOP i=2 TO resCount
+      jAnotherObject &= output.GetObject(i)
+      LOOP jAnotherObject.GetArraySize() TIMES
+        jAnotherObject.DeleteItemFromArray(1)
+      END
+    END
+  END
+  
+HasSameItem                   PROCEDURE(cJSON jObject, cJSON jItem)
+jChild                          &cJSON, AUTO
+  CODE
+  jChild &= jObject.GetChild()
+  LOOP WHILE NOT jChild &= NULL
+    IF jChild.GetType() = jItem.GetType() AND jChild.GetName() = jItem.GetName()
+      RETURN TRUE
+    END
+    jChild &= jChild.GetNext()
+  END
+  RETURN FALSE
+  
+GetTypeName                   PROCEDURE(cJSON jItem)
+  CODE
+  CASE BAND(jItem.GetType(), 0FFh)
+  OF cJSON_False OROF cJSON_True
+    RETURN 'boolean'
+  OF cJSON_NULL
+    RETURN 'null'
+  OF cJSON_Number
+    RETURN 'numeric'
+  OF cJSON_String OROF cJSON_Raw
+    RETURN 'string'
+  OF cJSON_Array
+    RETURN 'array'
+  OF cJSON_Object
+    RETURN 'object'
+  ELSE
+    RETURN 'undefined_type'
+  END
+  
+GetItemIndex                  PROCEDURE(cJSON jObject, STRING pItemName)
+jChild                          &cJSON, AUTO
+i                               LONG(0)
+  CODE
+  jChild &= jObject.GetChild()
+  LOOP WHILE NOT jChild &= NULL
+    i += 1
+    IF jChild.GetName() = pItemName
+      RETURN i
+    END
+    jChild &= jChild.GetNext()
+  END
+  RETURN 0
+  
+FixSameItemNames              PROCEDURE(cJSON jObject)
+jChild1                         &cJSON, AUTO
+jChild2                         &cJSON, AUTO
+nArrSize                        LONG, AUTO
+i                               LONG, AUTO
+j                               LONG, AUTO
+  CODE
+  nArrSize = jObject.GetArraySize()
+  IF jObject.IsArray() AND nArrSize > 0
+    LOOP i=1 TO nArrSize
+      jChild1 &= jObject.GetArrayItem(i)
+      jChild1.FixSameItemNames()
+    END
+  ELSIF jObject.IsObject() AND nArrSize > 1
+    LOOP i=1 TO nArrSize-1
+      jChild1 &= jObject.GetArrayItem(i)
+      LOOP j=i+1 TO nArrSize
+        jChild2 &= jObject.GetArrayItem(j)
+        
+        IF jChild1.GetName() = jChild2.GetName()
+          jChild2.SetName(printf('%s_as_%s', jChild2.GetName(), jChild2.GetTypeName()))
+        END
+      END
+      jChild1.FixSameItemNames()
+    END
+    jChild1 &= jObject.GetArrayItem(nArrSize)
+    jChild1.FixSameItemNames()
   END
 !!!endregion
   
@@ -859,15 +1008,14 @@ jParser                         cJSONFactory
 jRoot                           &cJSON, AUTO
 qPath                           QUEUE(typObjectPaths).
 i                               LONG, AUTO
+nNameSuffixPos                  LONG, AUTO
   CODE
   CLEAR(SELF.parseErrorPos)
   CLEAR(SELF.parseErrorString)
 
   FREE(SELF.qMap)
   
-!  jRoot &= jParser.Parse(pJson, CP_ACP)
-!  jRoot &= jParser.Parse(pJson)
-  jRoot &= jParser.Parse(pJson, 1251)
+  jRoot &= jParser.Parse(pJson)
   IF jRoot &= NULL
     SELF.parseErrorPos = jParser.GetErrorPosition()
     SELF.parseErrorString = jParser.GetError()
@@ -892,6 +1040,9 @@ i                               LONG, AUTO
     END
   END
   
+  !- now rename items with the same names in the object.
+  jRoot.FixSameItemNames()
+  
   !- at this point jRoot has the arrays with 1 element only, with the biggest possible strings and floating numerics if needed.
 !  printd('RESULTING JSON:%|%s', jRoot.ToString(TRUE))
   
@@ -901,7 +1052,15 @@ i                               LONG, AUTO
   !- validate Clarion names
   LOOP i=1 TO RECORDS(SELF.qMap)
     GET(SELF.qMap, i)
-    SELF.qMap.JsonName = SELF.qMap.FieldName
+    nNameSuffixPos = INSTRING('_as_', SELF.qMap.FieldName, 1, 1)
+    IF nNameSuffixPos > 1
+      !- rename back json names 'url_as_object'
+      SELF.qMap.JsonName = SELF.qMap.FieldName[1 : nNameSuffixPos-1]
+      SELF.qMap.MultiTyped = TRUE
+    ELSE
+      SELF.qMap.JsonName = SELF.qMap.FieldName
+      SELF.qMap.MultiTyped = FALSE
+    END
     SELF.qMap.FieldName = ValidateClarionName(SELF.qMap.FieldName)
     PUT(SELF.qMap)
   END

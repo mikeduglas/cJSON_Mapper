@@ -16,5 +16,8 @@ There are some options to handle resulting output:
 - <mikeduglas66@gmail.com>
 
 ## Version history
+v1.01 (04.11.2024)
+- NEW: Multi-type items supported.
+
 v1.0 (26.10.2024)
 - Initial release
