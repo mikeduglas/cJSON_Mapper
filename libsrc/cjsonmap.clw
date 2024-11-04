@@ -1,4 +1,4 @@
-!** cJSON mapper v1.01
+!** cJSON mapper v1.01.1
 !** 04.11.2024
 !** mikeduglas@yandex.com
 !** mikeduglas66@gmail.com
@@ -13,8 +13,8 @@
     MaxFieldNameSize(typCjsonMap pMap),LONG, PRIVATE
     GenProgramStart(STRING pJson, typCjsonMap pMap, *TStringBuilder sb), PRIVATE
     GenProgramEnd(STRING pJson, typCjsonMap pMap, typCJsonPrintMapOptions pOptions, *TStringBuilder sb), PRIVATE
-    BuildParseOptions(typCjsonMap pMap,*TStringBuilder sb), PRIVATE
-    BuildCreateOptions(typCjsonMap pMap,*TStringBuilder sb), PRIVATE
+    BuildParseCode(STRING pObjectName, LONG pObjectType, LONG pDataType, TParseOptionsBuilder pOptions, *TStringBuilder sb), PRIVATE
+    BuildCreateCode(STRING pObjectName, LONG pObjectType, LONG pDataType, TCreateOptionsBuilder pOptions, *TStringBuilder sb), PRIVATE
 
     NextPow2(LONG pVal), LONG, PRIVATE
     EscapeClaString(STRING pText), STRING, PRIVATE
@@ -35,6 +35,18 @@
 
     INCLUDE('printf.inc'), ONCE
   END
+
+ClaObjectType::QUEUE          EQUATE(1)   !- QUEUE
+ClaObjectType::GROUPARRAY     EQUATE(2)   !- GROUP, DIM
+ClaObjectType::GROUP          EQUATE(3)   !- GROUP
+ClaObjectType::TYPEARRAY      EQUATE(4)   !- LONG, DIM
+ClaObjectType::TYPE           EQUATE(5)   !- LONG
+
+ClaDataType::STRING           EQUATE(1)
+ClaDataType::LONG             EQUATE(2)
+ClaDataType::REAL             EQUATE(3)
+ClaDataType::BOOL             EQUATE(4)
+
 
 typObjectPath                 GROUP, TYPE
 sPath                           STRING(1024)
@@ -58,16 +70,35 @@ MultiTyped                      BOOL
                               END
 typCjsonMap                   QUEUE(typCjsonStruct), TYPE.
 
-ClaObjectType::QUEUE          EQUATE(1)   !- QUEUE
-ClaObjectType::GROUPARRAY     EQUATE(2)   !- GROUP, DIM
-ClaObjectType::GROUP          EQUATE(3)   !- GROUP
-ClaObjectType::TYPEARRAY      EQUATE(4)   !- LONG, DIM
-ClaObjectType::TYPE           EQUATE(5)   !- LONG
+typOption                     GROUP, TYPE
+Line                            STRING(4096)
+                              END
+typOptions                    QUEUE(typOption), TYPE.
 
-ClaDataType::STRING           EQUATE(1)
-ClaDataType::LONG             EQUATE(2)
-ClaDataType::REAL             EQUATE(3)
-ClaDataType::BOOL             EQUATE(4)
+TOptionsBuilder               CLASS, TYPE
+qUniqueMap                      &typCjsonMap, PRIVATE
+qOptions                        &typOptions, PRIVATE
+sb                              &TStringBuilder, PRIVATE
+
+Construct                       PROCEDURE()
+Destruct                        PROCEDURE(), VIRTUAL
+Init                            PROCEDURE(typCjsonMap pMap), VIRTUAL
+BuildOptions                    PROCEDURE(), VIRTUAL
+ToString                        PROCEDURE(), STRING
+
+BuildJsonNameRules              PROCEDURE(), PRIVATE
+BuildNameCaseRules              PROCEDURE(), PRIVATE
+BuildIsBoolRules                PROCEDURE(), PRIVATE
+OptionsToMultiLineString        PROCEDURE(), PRIVATE
+                              END
+
+TParseOptionsBuilder          CLASS(TOptionsBuilder), TYPE
+BuildOptions                    PROCEDURE(), DERIVED
+                              END
+
+TCreateOptionsBuilder         CLASS(TOptionsBuilder), TYPE
+BuildOptions                    PROCEDURE(), DERIVED
+                              END
 
 
 DefaultPrintOptions           PROCEDURE(*typCJsonPrintMapOptions pOptions)
@@ -102,24 +133,55 @@ i                               LONG, AUTO
   RETURN nMaxSize
 
 GenProgramStart               PROCEDURE(STRING pJson, typCjsonMap pMap, *TStringBuilder sb)
-sCodeStart                      STRING(   '  PROGRAM<13,10>'                          |
+sCodeStart                      STRING(   '  PROGRAM<13,10,13,10>'                    |
                                         & '  INCLUDE(''cjson.inc''), ONCE<13,10>'     |
                                         & '  MAP<13,10>'                              |
                                         & '    INCLUDE(''printf.inc''), ONCE<13,10>'  |
-                                        & '  END')
+                                        & '  END<13,10,13,10>')
   CODE
   sb.Cat(CLIP(sCodeStart))
-  sb.Cat('<13,10,13,10>')
   sb.Cat(printf('sJson                        STRING(%S)', EscapeClaString('<13,10>' & pJson))) !- <13,10> at start allows to more smarter json formatting
   sb.Cat('<13,10,13,10>')
   
 GenProgramEnd                 PROCEDURE(STRING pJson, typCjsonMap pMap, typCJsonPrintMapOptions pOptions, *TStringBuilder sb)
+sCodeEndGeneric                 STRING('' |    
+                                        & 'jParser                       cJSONFactory<13,10>'    |
+                                        & 'jRoot                         &cJSON, AUTO<13,10>'    |
+                                        & '  CODE<13,10>'                                        |
+                                        & '  !- JSON -> Clarion<13,10>'                          |
+                                        & '  %s<13,10,13,10>'                                    |
+                                        & '    !- Clarion -> JSON<13,10>'                        |
+                                        & '    jRoot &= %s<13,10>'                               |
+                                        & '    IF NOT jRoot &= NULL<13,10>'                      |
+                                        & '      !- check result in DebugView<13,10>'            |
+                                        & '      printd(jRoot.ToString(TRUE))<13,10>'            |
+                                        & '      jRoot.Delete()<13,10>'                          |
+                                        & '    END<13,10>'                                       |
+                                        & '  END')
+
+!- for LONG,DIM we use jItem and i additional variables
+sCodeEndTypeArray               STRING('' |    
+                                        & 'jParser                       cJSONFactory<13,10>'    |
+                                        & 'jRoot                         &cJSON, AUTO<13,10>'    |
+                                        & 'jItem                         &cJSON, AUTO<13,10>'    |
+                                        & 'i                             LONG, AUTO<13,10>'      |
+                                        & '  CODE<13,10>'                                        |
+                                        & '  !- JSON -> Clarion<13,10>'                          |
+                                        & '  %s<13,10,13,10>'                                    |
+                                        & '    !- Clarion -> JSON<13,10>'                        |
+                                        & '    jRoot &= %s<13,10>'                               |
+                                        & '    IF NOT jRoot &= NULL<13,10>'                      |
+                                        & '      !- check result in DebugView<13,10>'            |
+                                        & '      printd(jRoot.ToString(TRUE))<13,10>'            |
+                                        & '      jRoot.Delete()<13,10>'                          |
+                                        & '    END<13,10>'                                       |
+                                        & '  END')
+
 map1                            LIKE(typCjsonStruct)  !- properties of the field 1 (root)
 sbParse                         TStringBuilder
-sbParseOptions                  TStringBuilder
 sbCreate                        TStringBuilder
-sbCreateOptions                 TStringBuilder
-sbCodeEnd                       TStringBuilder
+parseOptions                    TParseOptionsBuilder
+createOptions                   TCreateOptionsBuilder
 nObjectType                     LONG(0)
 nDataType                       LONG(0)
   CODE
@@ -128,10 +190,10 @@ nDataType                       LONG(0)
   END
   
   sbParse.Init(1024)
-  sbParseOptions.Init(4096)
-  sbCreate.Init(4096)
-  sbCreateOptions.Init(4096)
-  sbCodeEnd.Init(1024)
+  sbCreate.Init(1024)
+
+  parseOptions.Init(pMap)
+  createOptions.Init(pMap)
 
   !- get the properties of 1st (root) field
   GET(pMap, 1)
@@ -165,208 +227,68 @@ nDataType                       LONG(0)
     nDataType = ClaDataType::BOOL
   END
 
-  !- build ToGroup() options
-  BuildParseOptions(pMap, sbParseOptions)
-
   CASE nObjectType 
   OF ClaObjectType::QUEUE OROF ClaObjectType::GROUPARRAY OROF ClaObjectType::GROUP
-    !- build json::CreateObject() options
-    BuildCreateOptions(pMap, sbCreateOptions)
+    !- build ToGroup/ToQueue and json::CreateObject/json::CreateArray options.
+    parseOptions.BuildOptions()
+    createOptions.BuildOptions()
   END
   
-  CASE nObjectType 
-  OF ClaObjectType::QUEUE
-    !- array of objects
-    sbParse.Cat(printf('IF jParser.ToQueue(sJson, %s, FALSE, | %|%s)', map1.FieldName, sbParseOptions.Str()))
-    sbCreate.Cat(printf('json::CreateArray(%s, TRUE, | %|%s)', map1.FieldName, sbCreateOptions.Str()))
-  OF ClaObjectType::GROUPARRAY
-    !- array of objects
-    sbParse.Cat(printf('IF jParser.ToGroupArray(sJson, %s, FALSE, | %|%s)', map1.FieldName, sbParseOptions.Str()))
-    sbCreate.Cat(printf('json::CreateArray(%s, TRUE, | %|%s)', map1.FieldName, sbCreateOptions.Str()))
-  OF ClaObjectType::GROUP
-    !- object
-    sbParse.Cat(printf('IF jParser.ToGroup(sJson, %s, FALSE, | %|%s)', map1.FieldName, sbParseOptions.Str()))
-    sbCreate.Cat(printf('json::CreateObject(%s, TRUE, | %|%s)', map1.FieldName, sbCreateOptions.Str()))
-  OF ClaObjectType::TYPEARRAY
-    !- simple array of primitives
-    sbParse.Cat(printf('jRoot &= jParser.Parse(sJson)%|  IF NOT jRoot &= NULL%|    LOOP i=1 TO MAXIMUM(%s,1)%|      jItem &= jRoot.GetArrayItem(i)%|      %s[i]=jItem.GetValue()%|    END%|    jRoot.Delete()%|', | 
-            map1.FieldName, map1.FieldName))
-    
-    sbCreate.Cat(printf('%s(%s)', CHOOSE(nDataType, 'json::CreateStringArray', 'json::CreateIntArray', 'json::CreateDoubleArray', 'NULL  ! json::CreateBoolArray not supported'), | 
-            map1.FieldName))
-
-  OF ClaObjectType::TYPE
-    !- primitive
-    sbParse.Cat(printf('jRoot &= jParser.Parse(sJson)%|  IF NOT jRoot &= NULL%|    %s=jRoot.GetValue()%|    jRoot.Delete()%|', map1.FieldName))
-    sbCreate.Cat(printf('%s(%s)', CHOOSE(nDataType, 'json::CreateString', 'json::CreateNumber', 'json::CreateNumber', 'json::CreateBool'), | 
-            map1.FieldName))
-  END
-  
-  IF nObjectType = ClaObjectType::TYPEARRAY
-    !- for LONG,DIM we use jItem and i additional variables
-    sbCodeEnd.Cat('' |    
-            & 'jParser                       cJSONFactory<13,10>'    |
-            & 'jRoot                         &cJSON, AUTO<13,10>'    |
-            & 'jItem                         &cJSON, AUTO<13,10>'    |
-            & 'i                             LONG, AUTO<13,10>'      |
-            & '  CODE<13,10>'                                        |
-            & '  !- JSON -> Clarion<13,10>'                          |
-            & '  %s<13,10>'                                          |
-            & '    !- Clarion -> JSON<13,10>'                        |
-            & '    jRoot &= %s<13,10>'                               |
-            & '    IF NOT jRoot &= NULL<13,10>'                      |
-            & '      !- check result in DebugView<13,10>'            |
-            & '      printd(jRoot.ToString(TRUE))<13,10>'            |
-            & '      jRoot.Delete()<13,10>'                          |
-            & '    END<13,10>'                                       |
-            & '  END')
-  ELSE
-    sbCodeEnd.Cat('' |    
-            & 'jParser                       cJSONFactory<13,10>'    |
-            & 'jRoot                         &cJSON, AUTO<13,10>'    |
-            & '  CODE<13,10>'                                        |
-            & '  !- JSON -> Clarion<13,10>'                          |
-            & '  %s<13,10>'                                          |
-            & '    !- Clarion -> JSON<13,10>'                        |
-            & '    jRoot &= %s<13,10>'                               |
-            & '    IF NOT jRoot &= NULL<13,10>'                      |
-            & '      !- check result in DebugView<13,10>'            |
-            & '      printd(jRoot.ToString(TRUE))<13,10>'            |
-            & '      jRoot.Delete()<13,10>'                          |
-            & '    END<13,10>'                                       |
-            & '  END')
-  END
-  
+  BuildParseCode(map1.FieldName, nObjectType, nDataType, parseOptions, sbParse)
+  BuildCreateCode(map1.FieldName, nObjectType, nDataType, createOptions, sbCreate)
   
   sb.Cat('<13,10>')
-  sb.Cat(printf(sbCodeEnd.Str(), sbParse.Str(), sbCreate.Str()))
+  sb.Cat(printf(CHOOSE(nObjectType = ClaObjectType::TYPEARRAY, sCodeEndTypeArray, sCodeEndGeneric), sbParse.Str(), sbCreate.Str()))
   sb.Cat('<13,10,13,10>')
+  
+BuildParseCode                PROCEDURE(STRING pObjectName, LONG pObjectType, LONG pDataType, TParseOptionsBuilder pOptions, *TStringBuilder sb)
+sQueuePattern                   STRING('IF jParser.ToQueue(sJson, %s, FALSE, | %|%s)')
+sGroupArrayPattern              STRING('IF jParser.ToGroupArray(sJson, %s, FALSE, | %|%s)')
+sGroupPattern                   STRING('IF jParser.ToGroup(sJson, %s, FALSE, | %|%s)')
+sTypeArrayPattern               STRING('jRoot &= jParser.Parse(sJson)%|  IF NOT jRoot &= NULL%|    LOOP i=1 TO MAXIMUM(%s,1)%|      jItem &= jRoot.GetArrayItem(i)%|      %s[i]=jItem.GetValue()%|    END%|    jRoot.Delete()%|')
+sTypePattern                    STRING('jRoot &= jParser.Parse(sJson)%|  IF NOT jRoot &= NULL%|    %s=jRoot.GetValue()%|    jRoot.Delete()%|')
+  CODE
+  CASE pObjectType 
+  OF ClaObjectType::QUEUE
+    !- array of objects
+    sb.Cat(printf(sQueuePattern, pObjectName, pOptions.ToString()))
+  OF ClaObjectType::GROUPARRAY
+    !- array of objects
+    sb.Cat(printf(sGroupArrayPattern, pObjectName, pOptions.ToString()))
+  OF ClaObjectType::GROUP
+    !- object
+    sb.Cat(printf(sGroupPattern, pObjectName, pOptions.ToString()))
+  OF ClaObjectType::TYPEARRAY
+    !- simple array of primitives
+    sb.Cat(printf(sTypeArrayPattern, pObjectName, pObjectName))
+  OF ClaObjectType::TYPE
+    !- primitive
+    sb.Cat(printf(sTypePattern, pObjectName))
+  END
 
-BuildParseOptions             PROCEDURE(typCjsonMap pMap,*TStringBuilder sb)
-i                               LONG, AUTO
-qUniqueMap                      QUEUE(typCjsonMap).
-qParseOptions                   QUEUE
-Line                              STRING(4096)
-                                END
+BuildCreateCode               PROCEDURE(STRING pObjectName, LONG pObjectType, LONG pDataType, TCreateOptionsBuilder pOptions, *TStringBuilder sb)
+sArrayPattern                   STRING('json::CreateArray(%s, TRUE, | %|%s)')
+sObjectPattern                  STRING('json::CreateObject(%s, TRUE, | %|%s)')
+sTypePattern                    STRING('json::Create%s(%s)')
   CODE
-  !- make unique field list
-  LOOP i=1 TO RECORDS(pMap)
-    GET(pMap, i)
-    qUniqueMap.FieldName = pMap.FieldName
-    GET(qUniqueMap, qUniqueMap.FieldName)
-    IF ERRORCODE()
-      qUniqueMap :=: pMap
-      ADD(qUniqueMap)
-    END
+  CASE pObjectType 
+  OF ClaObjectType::QUEUE OROF ClaObjectType::GROUPARRAY
+    !- array of objects
+    sb.Cat(printf(sArrayPattern, pObjectName, pOptions.ToString()))
+  OF ClaObjectType::GROUP
+    !- object
+    sb.Cat(printf(sObjectPattern, pObjectName, pOptions.ToString()))
+  OF ClaObjectType::TYPEARRAY
+    !- simple array of primitives
+    sb.Cat(printf(sTypePattern, | 
+            CHOOSE(pDataType, 'StringArray', 'IntArray', 'DoubleArray', 'NULL  ! json::CreateBoolArray not supported'), | 
+            pObjectName))
+  OF ClaObjectType::TYPE
+    !- primitive
+    sb.Cat(printf(sTypePattern, | 
+            CHOOSE(pDataType, 'String', 'Number', 'Number', 'Bool'), | 
+            pObjectName))
   END
-  
-  !- add JsonName rules for the fields with completely different names/jsonnames (unique names only)
-  LOOP i=1 TO RECORDS(qUniqueMap)
-    GET(qUniqueMap, i)
-    IF LOWER(qUniqueMap.FieldName) <> LOWER(qUniqueMap.JsonName)
-      CLEAR(qParseOptions)
-      qParseOptions.Line = printf('{{"name":"%s", "JsonName":"%s"}', qUniqueMap.FieldName, qUniqueMap.JsonName)
-      ADD(qParseOptions)
-    END
-  END
-  
-  !- convert parse options list to the multi-line string.
-  LOOP i=1 TO RECORDS(qParseOptions)
-    GET(qParseOptions, i)
-    IF i=1
-      qParseOptions.Line = '['& CLIP(qParseOptions.Line)
-    END
-    IF i=RECORDS(qParseOptions)
-      qParseOptions.Line = CLIP(qParseOptions.Line) &']'
-    END
-    
-    IF i < RECORDS(qParseOptions)
-      sb.Cat(printf('      %S & | %|', CLIP(qParseOptions.Line) &',', qParseOptions.Line))
-    ELSE
-      sb.Cat(printf('      %S', qParseOptions.Line))
-    END
-  END
-  
-BuildCreateOptions            PROCEDURE(typCjsonMap pMap,*TStringBuilder sb)
-i                               LONG, AUTO
-qUniqueMap                      QUEUE(typCjsonMap).
-qCreateOptions                  QUEUE
-Line                              STRING(4096)
-                                END
-  CODE
-  !- make unique field list
-  LOOP i=1 TO RECORDS(pMap)
-    GET(pMap, i)
-    qUniqueMap.FieldName = pMap.FieldName
-    GET(qUniqueMap, qUniqueMap.FieldName)
-    IF ERRORCODE()
-      qUniqueMap :=: pMap
-      ADD(qUniqueMap)
-    END
-  END
-  
-  qCreateOptions.Line = '{{"name":"*","IgnoreEmptyObject":true,"IgnoreEmptyArray":true,"EmptyString":"ignore"}'
-  ADD(qCreateOptions)
-  
-  !- add IsBool rule
-  CLEAR(qCreateOptions)
-  LOOP i=1 TO RECORDS(qUniqueMap)
-    GET(qUniqueMap, i)
-    IF qUniqueMap.FieldType = 'BOOL'
-      IF qCreateOptions.Line
-        qCreateOptions.Line = CLIP(qCreateOptions.Line) &','
-      END
-      qCreateOptions.Line = CLIP(qCreateOptions.Line) & printf('"%s"', qUniqueMap.FieldName)
-    END
-  END
-  IF qCreateOptions.Line
-    qCreateOptions.Line = printf('{{"name":[%s], "IsBool":true}', qCreateOptions.Line)
-    ADD(qCreateOptions)
-  END
-  
-  !- add JsonName rules for the fields with completely different names/jsonnames (unique names only)
-  CLEAR(qCreateOptions)
-  LOOP i=1 TO RECORDS(qUniqueMap)
-    GET(qUniqueMap, i)
-    IF LOWER(qUniqueMap.FieldName) <> LOWER(qUniqueMap.JsonName)
-      CLEAR(qCreateOptions)
-      qCreateOptions.Line = printf('{{"name":"%s", "JsonName":"%s"}', qUniqueMap.FieldName, qUniqueMap.JsonName)
-      ADD(qCreateOptions)
-    END
-  END
-      
-  !- add JsonName rules for the fields with case different names/jsonnames (json name is in camel case for example).
-  CLEAR(qCreateOptions)
-  LOOP i=1 TO RECORDS(qUniqueMap)
-    GET(qUniqueMap, i)
-    IF (LOWER(qUniqueMap.FieldName) <> qUniqueMap.JsonName) AND (LOWER(qUniqueMap.FieldName) = LOWER(qUniqueMap.JsonName))
-      IF qCreateOptions.Line
-        qCreateOptions.Line = CLIP(qCreateOptions.Line) &','
-      END
-      qCreateOptions.Line = CLIP(qCreateOptions.Line) & printf('"%s"', qUniqueMap.FieldName)
-    END
-  END
-  IF qCreateOptions.Line
-    qCreateOptions.Line = printf('{{"name":[%s], "JsonName":"*"}', qCreateOptions.Line)
-    ADD(qCreateOptions)
-  END
-  
-  !- convert create options list to the multi-line string.
-  LOOP i=1 TO RECORDS(qCreateOptions)
-    GET(qCreateOptions, i)
-    IF i=1
-      qCreateOptions.Line = '['& CLIP(qCreateOptions.Line)
-    END
-    IF i=RECORDS(qCreateOptions)
-      qCreateOptions.Line = CLIP(qCreateOptions.Line) &']'
-    END
-    
-    IF i < RECORDS(qCreateOptions)
-      sb.Cat(printf('      %S & | %|', CLIP(qCreateOptions.Line) &',', qCreateOptions.Line))
-    ELSE
-      sb.Cat(printf('      %S', qCreateOptions.Line))
-    END
-  END  
 
 NextPow2                      PROCEDURE(LONG pVal)
 !https://stackoverflow.com/questions/466204/rounding-up-to-next-power-of-2
@@ -1215,3 +1137,147 @@ TCJsonMapper.GetError         PROCEDURE()
   CODE
   RETURN printf('Error in json near "%s" at position %i.', SELF.parseErrorString, SELF.parseErrorPos)
 !!!endregion
+  
+!!!region TOptionsBuilder
+TOptionsBuilder.Construct     PROCEDURE()
+  CODE
+  SELF.qUniqueMap &= NEW typCjsonMap
+  SELF.qOptions &= NEW typOptions
+  SELF.sb &= NEW TStringBuilder
+  
+TOptionsBuilder.Destruct      PROCEDURE()
+  CODE
+  FREE(SELF.qUniqueMap)
+  DISPOSE(SELF.qUniqueMap)
+  FREE(SELF.qOptions)
+  DISPOSE(SELF.qOptions)
+  DISPOSE(SELF.sb)
+  
+TOptionsBuilder.Init          PROCEDURE(typCjsonMap pMap)
+i                               LONG, AUTO
+  CODE
+  !- make unique field list
+  FREE(SELF.qUniqueMap)
+  LOOP i=1 TO RECORDS(pMap)
+    GET(pMap, i)
+    SELF.qUniqueMap.FieldName = pMap.FieldName
+    GET(SELF.qUniqueMap, SELF.qUniqueMap.FieldName)
+    IF ERRORCODE()
+      SELF.qUniqueMap :=: pMap
+      ADD(SELF.qUniqueMap)
+    END
+  END
+  
+  SELF.sb.Reset()
+  SELF.sb.Init(1024)
+
+TOptionsBuilder.BuildOptions  PROCEDURE()
+  CODE
+  
+TOptionsBuilder.ToString      PROCEDURE()
+  CODE
+  RETURN SELF.sb.Str()
+  
+TOptionsBuilder.BuildJsonNameRules    PROCEDURE()
+i                                       LONG, AUTO
+  CODE
+  !- add JsonName rules for the fields with completely different names/jsonnames (unique names only)
+  LOOP i=1 TO RECORDS(SELF.qUniqueMap)
+    GET(SELF.qUniqueMap, i)
+    IF LOWER(SELF.qUniqueMap.FieldName) <> LOWER(SELF.qUniqueMap.JsonName)
+      CLEAR(SELF.qOptions)
+      SELF.qOptions.Line = printf('{{"name":"%s", "JsonName":"%s"}', SELF.qUniqueMap.FieldName, SELF.qUniqueMap.JsonName)
+      ADD(SELF.qOptions)
+    END
+  END
+
+TOptionsBuilder.BuildNameCaseRules    PROCEDURE()
+i                                       LONG, AUTO
+  CODE
+  !- add JsonName rules for the fields with case different names/jsonnames (json name is in camel case for example).
+  CLEAR(SELF.qOptions)
+  LOOP i=1 TO RECORDS(SELF.qUniqueMap)
+    GET(SELF.qUniqueMap, i)
+    IF (LOWER(SELF.qUniqueMap.FieldName) <> SELF.qUniqueMap.JsonName) AND (LOWER(SELF.qUniqueMap.FieldName) = LOWER(SELF.qUniqueMap.JsonName))
+      IF SELF.qOptions.Line
+        SELF.qOptions.Line = CLIP(SELF.qOptions.Line) &','
+      END
+      SELF.qOptions.Line = CLIP(SELF.qOptions.Line) & printf('"%s"', SELF.qUniqueMap.FieldName)
+    END
+  END
+  IF SELF.qOptions.Line
+    SELF.qOptions.Line = printf('{{"name":[%s], "JsonName":"*"}', SELF.qOptions.Line)
+    ADD(SELF.qOptions)
+  END
+
+TOptionsBuilder.BuildIsBoolRules  PROCEDURE()
+i                                   LONG, AUTO
+  CODE
+  !- add IsBool rule
+  CLEAR(SELF.qOptions)
+  LOOP i=1 TO RECORDS(SELF.qUniqueMap)
+    GET(SELF.qUniqueMap, i)
+    IF SELF.qUniqueMap.FieldType = 'BOOL'
+      IF SELF.qOptions.Line
+        SELF.qOptions.Line = CLIP(SELF.qOptions.Line) &','
+      END
+      SELF.qOptions.Line = CLIP(SELF.qOptions.Line) & printf('"%s"', SELF.qUniqueMap.FieldName)
+    END
+  END
+  IF SELF.qOptions.Line
+    SELF.qOptions.Line = printf('{{"name":[%s], "IsBool":true}', SELF.qOptions.Line)
+    ADD(SELF.qOptions)
+  END
+
+TOptionsBuilder.OptionsToMultiLineString  PROCEDURE()
+i                                           LONG, AUTO
+  CODE
+  !- convert create options list to the multi-line string.
+  IF RECORDS(SELF.qOptions)
+    LOOP i=1 TO RECORDS(SELF.qOptions)
+      GET(SELF.qOptions, i)
+      IF i=1
+        SELF.qOptions.Line = '['& CLIP(SELF.qOptions.Line)
+      END
+      IF i=RECORDS(SELF.qOptions)
+        SELF.qOptions.Line = CLIP(SELF.qOptions.Line) &']'
+      END
+    
+      IF i < RECORDS(SELF.qOptions)
+        SELF.sb.Cat(printf('      %S & | %|', CLIP(SELF.qOptions.Line) &',', SELF.qOptions.Line))
+      ELSE
+        SELF.sb.Cat(printf('      %S', SELF.qOptions.Line))
+      END
+    END  
+  ELSE
+    SELF.sb.Cat('      ''''')
+  END
+!!!endregion
+
+!!!region TParseOptionsBuilder
+TParseOptionsBuilder.BuildOptions PROCEDURE()
+  CODE
+  !- add JsonName rules for the fields with completely different names/jsonnames (unique names only)
+  SELF.BuildJsonNameRules()
+  
+  !- convert parse options list to the multi-line string.
+  SELF.OptionsToMultiLineString()
+!!!endregion
+
+!!!region TCreateOptionsBuilder
+TCreateOptionsBuilder.BuildOptions    PROCEDURE()
+  CODE
+  SELF.qOptions.Line = '{{"name":"*","IgnoreEmptyObject":true,"IgnoreEmptyArray":true,"EmptyString":"ignore"}'
+  ADD(SELF.qOptions)
+  
+  !- add IsBool rule
+  SELF.BuildIsBoolRules()
+  
+  !- add JsonName rules for the fields with completely different names/jsonnames (unique names only)
+  SELF.BuildJsonNameRules()
+      
+  !- add JsonName rules for the fields with case different names/jsonnames (json name is in camel case for example)
+  SELF.BuildNameCaseRules()
+  
+  !- convert create options list to the multi-line string.
+  SELF.OptionsToMultiLineString()
