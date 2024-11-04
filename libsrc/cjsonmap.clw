@@ -1,4 +1,4 @@
-!** cJSON mapper v1.01.1
+!** cJSON mapper v1.01.2
 !** 04.11.2024
 !** mikeduglas@yandex.com
 !** mikeduglas66@gmail.com
@@ -501,7 +501,7 @@ j                               LONG, AUTO
         IF NOT jFisrtObject.HasItem(sItemName, TRUE)
           !- no such item name in 1st object - add it.
           jFisrtObject.AddItemToObject(sItemName, jAnotherObject.DetachItemViaPointer(jAnotherItem))
-
+          
           !- j counter stays the same because we removed the item.
           
         ELSIF NOT jFisrtObject.HasSameItem(jAnotherItem)
@@ -551,7 +551,7 @@ jChild                          &cJSON, AUTO
   CODE
   jChild &= jObject.GetChild()
   LOOP WHILE NOT jChild &= NULL
-    IF jChild.GetType() = jItem.GetType() AND jChild.GetName() = jItem.GetName()
+    IF ((jChild.IsBool() AND jItem.IsBool()) OR (jChild.GetType() = jItem.GetType())) AND jChild.GetName() = jItem.GetName()
       RETURN TRUE
     END
     jChild &= jChild.GetNext()
