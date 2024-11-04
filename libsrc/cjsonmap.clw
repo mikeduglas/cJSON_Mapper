@@ -497,7 +497,7 @@ j                               LONG, AUTO
         END
 
         sItemName = jAnotherItem.GetName()
-        
+  
         IF NOT jFisrtObject.HasItem(sItemName, TRUE)
           !- no such item name in 1st object - add it.
           jFisrtObject.AddItemToObject(sItemName, jAnotherObject.DetachItemViaPointer(jAnotherItem))
@@ -506,11 +506,19 @@ j                               LONG, AUTO
           
         ELSIF NOT jFisrtObject.HasSameItem(jAnotherItem)
           !- 1st object has an item with same name but different type - add (insert) it right after existing item.
+          !- Replace null object with other.
           !- Don't add nulls.
-          IF NOT jAnotherItem.IsNull()
+          jItem &= jFisrtObject.GetObjectItem(sItemName, TRUE)
+          IF jItem.IsNull()
+            !- replace null object with non-null object
+            jFisrtObject.ReplaceItemViaPointer(jItem, jAnotherObject.DetachItemViaPointer(jAnotherItem))
+            !- j counter stays the same because we removed the item.
+          ELSIF NOT jAnotherItem.IsNull()
+            !- add object with different type (except null type)
             jFisrtObject.InsertItemInArray(jFisrtObject.GetItemIndex(sItemName)+1, jAnotherObject.DetachItemViaPointer(jAnotherItem))
             !- j counter stays the same because we removed the item.
           ELSE
+            !- nothing to do: objects are the same by name and type.
             !- next another element
             j += 1
           END
@@ -551,7 +559,7 @@ jChild                          &cJSON, AUTO
   CODE
   jChild &= jObject.GetChild()
   LOOP WHILE NOT jChild &= NULL
-    IF ((jChild.IsBool() AND jItem.IsBool()) OR (jChild.GetType() = jItem.GetType())) AND jChild.GetName() = jItem.GetName()
+    IF jChild.GetTypeName() = jItem.GetTypeName() AND jChild.GetName() = jItem.GetName()
       RETURN TRUE
     END
     jChild &= jChild.GetNext()
@@ -966,7 +974,7 @@ nNameSuffixPos                  LONG, AUTO
   jRoot.FixSameItemNames()
   
   !- at this point jRoot has the arrays with 1 element only, with the biggest possible strings and floating numerics if needed.
-!  printd('RESULTING JSON:%|%s', jRoot.ToString(TRUE))
+  printd('RESULTING JSON:%|%s', jRoot.ToString(TRUE))
   
   SELF.MapItem(jRoot, 0, '')
   jRoot.Delete()
