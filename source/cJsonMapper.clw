@@ -31,7 +31,7 @@ _UI_ENHANCEMENTS_             EQUATE(0)
   END
 
 codePage                      LONG, AUTO
-PROGRAM_NAME_AND_VERSION      EQUATE('cJSON Mapper v1.0.0')
+PROGRAM_NAME_AND_VERSION      EQUATE('cJSON Mapper v1.0.2')
 
   CODE
   !- set active charset

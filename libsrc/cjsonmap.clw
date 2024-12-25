@@ -1,5 +1,5 @@
-!** cJSON mapper v1.01.2
-!** 04.11.2024
+!** cJSON mapper v1.01.3
+!** 25.12.2024
 !** mikeduglas@yandex.com
 !** mikeduglas66@gmail.com
 
@@ -1194,7 +1194,7 @@ i                                       LONG, AUTO
     GET(SELF.qUniqueMap, i)
     IF LOWER(SELF.qUniqueMap.FieldName) <> LOWER(SELF.qUniqueMap.JsonName)
       CLEAR(SELF.qOptions)
-      SELF.qOptions.Line = printf('{{"name":"%s", "JsonName":"%s"}', SELF.qUniqueMap.FieldName, SELF.qUniqueMap.JsonName)
+      SELF.qOptions.Line = printf('{{{"name":"%s", "JsonName":"%s"}', SELF.qUniqueMap.FieldName, SELF.qUniqueMap.JsonName)
       ADD(SELF.qOptions)
     END
   END
@@ -1214,7 +1214,7 @@ i                                       LONG, AUTO
     END
   END
   IF SELF.qOptions.Line
-    SELF.qOptions.Line = printf('{{"name":[%s], "JsonName":"*"}', SELF.qOptions.Line)
+    SELF.qOptions.Line = printf('{{{"name":[%s], "JsonName":"*"}', SELF.qOptions.Line)
     ADD(SELF.qOptions)
   END
 
@@ -1233,7 +1233,7 @@ i                                   LONG, AUTO
     END
   END
   IF SELF.qOptions.Line
-    SELF.qOptions.Line = printf('{{"name":[%s], "IsBool":true}', SELF.qOptions.Line)
+    SELF.qOptions.Line = printf('{{{"name":[%s], "IsBool":true}', SELF.qOptions.Line)
     ADD(SELF.qOptions)
   END
 
@@ -1245,14 +1245,16 @@ i                                           LONG, AUTO
     LOOP i=1 TO RECORDS(SELF.qOptions)
       GET(SELF.qOptions, i)
       IF i=1
+        !- start of an array: opening square bracket
         SELF.qOptions.Line = '['& CLIP(SELF.qOptions.Line)
       END
       IF i=RECORDS(SELF.qOptions)
+        !- end of an array: closing square bracket
         SELF.qOptions.Line = CLIP(SELF.qOptions.Line) &']'
       END
     
       IF i < RECORDS(SELF.qOptions)
-        SELF.sb.Cat(printf('      %S & | %|', CLIP(SELF.qOptions.Line) &',', SELF.qOptions.Line))
+        SELF.sb.Cat(printf('      %S & | %|', CLIP(SELF.qOptions.Line) &','))
       ELSE
         SELF.sb.Cat(printf('      %S', SELF.qOptions.Line))
       END
@@ -1275,7 +1277,7 @@ TParseOptionsBuilder.BuildOptions PROCEDURE()
 !!!region TCreateOptionsBuilder
 TCreateOptionsBuilder.BuildOptions    PROCEDURE()
   CODE
-  SELF.qOptions.Line = '{{"name":"*","IgnoreEmptyObject":true,"IgnoreEmptyArray":true,"EmptyString":"ignore"}'
+  SELF.qOptions.Line = '{{{"name":"*","IgnoreEmptyObject":true,"IgnoreEmptyArray":true,"EmptyString":"ignore"}'
   ADD(SELF.qOptions)
   
   !- add IsBool rule
@@ -1289,3 +1291,4 @@ TCreateOptionsBuilder.BuildOptions    PROCEDURE()
   
   !- convert create options list to the multi-line string.
   SELF.OptionsToMultiLineString()
+!!!endregion

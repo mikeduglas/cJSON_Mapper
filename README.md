@@ -16,6 +16,9 @@ There are some options to handle resulting output:
 - <mikeduglas66@gmail.com>
 
 ## Version history
+v1.02 (25.12.2024)
+- FIX: Opening curly braces in generated code weren't duplicated.
+
 v1.01 (04.11.2024)
 - NEW: Multi-type items supported.
 
